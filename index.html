@@ -883,6 +883,1823 @@
           <div class="stat"><span>오늘 루틴 달성</span><strong id="todayAchieved">아니오</strong></div>
           <div class="stat"><span>연속 성공</span><strong id="reviewStreak">0일</strong></div>
           <div class="stat"><span>보관한 생각</span><strong id="savedThoughts">0</strong></div>
+          <div class="stat"><span>저장 백업</span><strong id="backupCount">0개</strong></div>
+          <button class="soft-button" id="restoreBackupButton">최근 백업 복구</button>
+          <button class="soft-button" id="resetButton">샘플 기록 초기화</button>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" id="news">
+      <div class="news-page">
+        <form class="panel news-form" id="newsForm">
+          <h2>뉴스 정리</h2>
+          <label>
+            제목
+            <input type="text" id="newsTitle" placeholder="오늘 본 뉴스 제목" required>
+          </label>
+          <label>
+            핵심 문장
+            <textarea id="newsPoint" placeholder="뉴스의 핵심을 한 문장으로"></textarea>
+          </label>
+          <label>
+            내 생각
+            <textarea id="newsThought" placeholder="왜 중요하다고 느꼈는지"></textarea>
+          </label>
+          <label>
+            다음 행동
+            <input type="text" id="newsAction" placeholder="찾아보기, 질문하기, 기록하기">
+          </label>
+          <button class="big-button" type="submit">정리</button>
+        </form>
+
+        <div class="news-tools">
+          <article class="panel calendar">
+            <div class="section-head">
+              <h2 id="newsCalendarTitle">뉴스 달력</h2>
+              <div class="calendar-nav">
+                <button class="icon-button" id="prevNewsMonthButton" type="button" aria-label="이전 달">‹</button>
+                <button class="icon-button" id="todayNewsMonthButton" type="button" aria-label="이번 달">•</button>
+                <button class="icon-button" id="nextNewsMonthButton" type="button" aria-label="다음 달">›</button>
+              </div>
+            </div>
+            <div class="calendar-grid" id="newsCalendarGrid"></div>
+          </article>
+
+          <article class="panel news-list">
+            <div class="section-head">
+              <h2 id="newsListTitle">뉴스 노트</h2>
+              <span class="pill" id="newsCount">0개</span>
+            </div>
+            <div class="search-row">
+              <input type="text" id="newsSearchInput" placeholder="헤드라인, 핵심 문장, 생각 검색">
+              <div class="routine-list" id="newsList"></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="sentences">
+      <div class="sentence-page">
+        <form class="panel sentence-form" id="sentenceForm">
+          <h2>문장 수집</h2>
+          <label>
+            문장
+            <textarea id="sentenceText" placeholder="오늘 남기고 싶은 문장" required></textarea>
+          </label>
+          <label>
+            출처
+            <input type="text" id="sentenceSource" placeholder="예: 신문, 전화영어, 책">
+          </label>
+          <label>
+            생각 메모
+            <input type="text" id="sentenceNote" placeholder="왜 남기고 싶은지 짧게">
+          </label>
+          <button class="big-button" type="submit">수집</button>
+        </form>
+
+        <article class="panel sentence-list">
+          <div class="section-head">
+            <h2>수집한 문장</h2>
+            <span class="pill" id="sentenceCount">0개</span>
+          </div>
+          <div class="routine-list" id="sentenceList"></div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script>
+    const days = ["월", "화", "수", "목", "금", "토", "일"];
+    const periods = ["등교 전", "등교 후", "하교 후"];
+    const levelLabels = { must: "필수", base: "기본", extra: "여유" };
+    const storageKey = "routine-return-sample-v10";
+    const backupKey = `${storageKey}-backups`;
+    const firebaseConfig = {
+      apiKey: "AIzaSyCgWZvEF94JA-aaUXg0Oe7mcFC4XOwousc",
+      authDomain: "my-routine-d3ab8.firebaseapp.com",
+      projectId: "my-routine-d3ab8",
+      storageBucket: "my-routine-d3ab8.firebasestorage.app",
+      messagingSenderId: "931496968100",
+      appId: "1:931496968100:web:4a4d21be367b2050d48b31"
+    };
+    const firebaseDocumentPath = "memento/default";
+    let cloudDb = null;
+    let cloudSaveTimer = null;
+    let applyingCloudState = false;
+
+    function makeWeekdayRoutines() {
+      const weekdayDays = ["월", "화", "수", "목", "금"];
+      const morning = [
+        ["세수 양치", "세면대 앞에 서기", "must"],
+        ["음악틀기", "음악 앱 열기", "base"],
+        ["줄넘기 3분 2사이클", "줄넘기 꺼내기", "base"],
+        ["식물 물주고 잡초 뽑기", "화분 앞에 서기", "base"],
+        ["아침 만들기", "부엌 불 켜기", "must"],
+        ["식세기돌리기", "식세기 문 열기", "base"],
+        ["1층 청소기 돌리기", "청소기 꺼내기", "base"]
+      ];
+      const schoolTime = [
+        ["세탁기 돌리기", "세탁물 넣기", "must"],
+        ["2층 청소기 돌리기", "2층으로 올라가기", "base"],
+        ["신문읽고 헤드라인, 생각정리", "신문 펼치기", "base"],
+        ["전화영어", "전화영어 준비 화면 열기", "must"],
+        ["문장수집", "수집 노트 열기", "base"],
+        ["피아노연습", "피아노 앞에 앉기", "base"]
+      ];
+      const afterSchool = [
+        ["데런 추세추종 정리", "차트와 기록장 열기", "base"],
+        ["일기쓰기", "일기장 열기", "must"],
+        ["세수 양치", "세면대 앞에 서기", "must"]
+      ];
+      let id = 1;
+      return weekdayDays.flatMap((day) => [
+        ...morning.map(([name, step, level]) => ({ id: id++, day, period: "등교 전", level, name, step, done: false })),
+        ...schoolTime.map(([name, step, level]) => ({ id: id++, day, period: "등교 후", level, name, step, done: false })),
+        ...(day === "수" || day === "금" ? [{ id: id++, day, period: "하교 후", level: "base", name: "도서관가기", step: "도서관 가방 챙기기", done: false }] : []),
+        ...afterSchool.map(([name, step, level]) => ({ id: id++, day, period: "하교 후", level, name, step, done: false }))
+      ]);
+    }
+
+    const defaultState = {
+      routines: makeWeekdayRoutines(),
+      captures: [],
+      returns: 0,
+      completedFlows: 0,
+      review: { status: "", reason: "" },
+      routineDone: {},
+      dailyReviews: {},
+      sentences: [],
+      newsEntries: []
+    };
+
+    let state = loadState();
+    let visibleCalendarDate = new Date();
+    let visibleNewsCalendarDate = new Date();
+    let selectedNewsDateKey = dateKey(new Date());
+    let newsSearchQuery = "";
+
+    function loadState() {
+      const saved = localStorage.getItem(storageKey);
+      if (!saved) return structuredClone(defaultState);
+      try {
+        return normalizeState(JSON.parse(saved));
+      } catch {
+        return structuredClone(defaultState);
+      }
+    }
+
+    function saveState() {
+      writeLocalState(state);
+      createBackup("자동 저장", state);
+      scheduleCloudSave();
+    }
+
+    function writeLocalState(nextState) {
+      localStorage.setItem(storageKey, JSON.stringify(nextState));
+    }
+
+    function stateScore(value) {
+      const source = value || {};
+      const doneCount = Object.values(source.routineDone || {}).reduce((total, day) => {
+        return total + Object.values(day || {}).filter(Boolean).length;
+      }, 0);
+      const reviewCount = Object.values(source.dailyReviews || {}).filter((review) => {
+        return review && (review.status || review.bedtime || review.screenTime);
+      }).length;
+      return doneCount
+        + (source.captures || []).length
+        + (source.sentences || []).length
+        + (source.newsEntries || []).length
+        + reviewCount;
+    }
+
+    function getBackups() {
+      try {
+        return JSON.parse(localStorage.getItem(backupKey) || "[]");
+      } catch {
+        return [];
+      }
+    }
+
+    function backupFingerprint(value) {
+      return JSON.stringify({
+        routineDone: value.routineDone || {},
+        captures: value.captures || [],
+        sentences: value.sentences || [],
+        newsEntries: value.newsEntries || [],
+        dailyReviews: value.dailyReviews || {}
+      });
+    }
+
+    function createBackup(label, sourceState) {
+      const normalized = normalizeState(sourceState);
+      if (!stateScore(normalized)) return;
+      const fingerprint = backupFingerprint(normalized);
+      const backups = getBackups().filter((backup) => backup.fingerprint !== fingerprint);
+      backups.unshift({
+        id: Date.now(),
+        label,
+        createdAt: new Date().toLocaleString("ko-KR"),
+        score: stateScore(normalized),
+        fingerprint,
+        state: normalized
+      });
+      localStorage.setItem(backupKey, JSON.stringify(backups.slice(0, 30)));
+    }
+
+    function mergeListByKey(localList, remoteList, keyGetter) {
+      const map = new Map();
+      [...(localList || []), ...(remoteList || [])].forEach((item) => {
+        const key = keyGetter(item);
+        if (key && !map.has(key)) map.set(key, item);
+      });
+      return Array.from(map.values());
+    }
+
+    function mergeStates(localState, remoteState) {
+      const local = normalizeState(localState);
+      const remote = normalizeState(remoteState);
+      const merged = normalizeState({ ...local, ...remote });
+      merged.routineDone = { ...local.routineDone };
+      Object.entries(remote.routineDone || {}).forEach(([key, value]) => {
+        merged.routineDone[key] = { ...(merged.routineDone[key] || {}), ...(value || {}) };
+      });
+      merged.dailyReviews = { ...local.dailyReviews };
+      Object.entries(remote.dailyReviews || {}).forEach(([key, value]) => {
+        const current = merged.dailyReviews[key] || {};
+        merged.dailyReviews[key] = {
+          ...current,
+          ...(value || {}),
+          status: value?.status || current.status || "",
+          bedtime: value?.bedtime || current.bedtime || "",
+          screenTime: value?.screenTime || current.screenTime || ""
+        };
+      });
+      merged.captures = mergeListByKey(local.captures, remote.captures, (item) => item.id || item.text);
+      merged.sentences = mergeListByKey(local.sentences, remote.sentences, (item) => item.id || `${item.date}-${item.text}`);
+      merged.newsEntries = mergeListByKey(local.newsEntries, remote.newsEntries, (item) => item.id || `${item.dateKey}-${item.title}`);
+      return normalizeState(merged);
+    }
+
+    function normalizeState(value) {
+      const parsed = { ...structuredClone(defaultState), ...(value || {}) };
+      parsed.captures = normalizeCaptures(parsed.captures);
+      parsed.routines = mergeDefaultRoutines(parsed.routines);
+      parsed.dailyReviews = parsed.dailyReviews || {};
+      parsed.routineDone = parsed.routineDone || {};
+      parsed.sentences = parsed.sentences || [];
+      parsed.newsEntries = normalizeNewsEntries(parsed.newsEntries);
+      return parsed;
+    }
+
+    function hasFirebaseConfig() {
+      return firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("PASTE_");
+    }
+
+    function setSyncStatus(text) {
+      const target = document.getElementById("syncStatus");
+      if (target) target.textContent = text;
+    }
+
+    function scheduleCloudSave() {
+      if (!cloudDb || applyingCloudState) return;
+      clearTimeout(cloudSaveTimer);
+      cloudSaveTimer = setTimeout(async () => {
+        try {
+          setSyncStatus("저장중");
+          await cloudDb.doc(firebaseDocumentPath).set({
+            state,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          setSyncStatus("Firebase");
+        } catch {
+          setSyncStatus("오류");
+        }
+      }, 450);
+    }
+
+    async function initFirebaseSync() {
+      if (!hasFirebaseConfig() || !window.firebase?.firestore) {
+        setSyncStatus("로컬");
+        return;
+      }
+
+      try {
+        firebase.initializeApp(firebaseConfig);
+        cloudDb = firebase.firestore();
+        setSyncStatus("연결중");
+
+        const ref = cloudDb.doc(firebaseDocumentPath);
+        const snap = await ref.get();
+        if (snap.exists) {
+          const remote = snap.data()?.state || {};
+          createBackup("Firebase 동기화 전", state);
+          state = mergeStates(state, remote);
+          writeLocalState(state);
+          if (stateScore(state) > stateScore(remote)) {
+            scheduleCloudSave();
+          }
+        } else {
+          await ref.set({
+            state,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        }
+
+        ref.onSnapshot((snapshot) => {
+          if (!snapshot.exists) return;
+          applyingCloudState = true;
+          const remote = snapshot.data()?.state || {};
+          createBackup("Firebase 업데이트 전", state);
+          state = mergeStates(state, remote);
+          writeLocalState(state);
+          renderAll();
+          applyingCloudState = false;
+          if (stateScore(state) > stateScore(remote)) {
+            scheduleCloudSave();
+          }
+          setSyncStatus("Firebase");
+        });
+
+        renderAll();
+        setSyncStatus("Firebase");
+      } catch {
+        setSyncStatus("로컬");
+      }
+    }
+
+    function normalizeCaptures(captures) {
+      return (captures || []).map((item) => {
+        if (typeof item === "string") {
+          return { id: Date.now() + Math.random(), text: item, done: false, createdAt: "" };
+        }
+        return {
+          id: item.id || Date.now() + Math.random(),
+          text: item.text || "",
+          done: Boolean(item.done),
+          createdAt: item.createdAt || ""
+        };
+      }).filter((item) => item.text);
+    }
+
+    function normalizeNewsEntries(entries) {
+      return (entries || []).map((entry) => ({
+        id: entry.id || Date.now() + Math.random(),
+        date: entry.date || new Date().toLocaleDateString("ko-KR"),
+        dateKey: entry.dateKey || parseKoreanDateKey(entry.date) || dateKey(new Date()),
+        title: entry.title || "",
+        point: entry.point || "",
+        thought: entry.thought || "",
+        action: entry.action || ""
+      })).filter((entry) => entry.title);
+    }
+
+    function parseKoreanDateKey(value) {
+      if (!value) return "";
+      const match = String(value).match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})/);
+      if (!match) return "";
+      return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+    }
+
+    function mergeDefaultRoutines(routines) {
+      const merged = routines || [];
+      merged.forEach((routine) => {
+        if (routine.period === "등교 후" && routine.name === "1,2층 청소기 돌리기") {
+          routine.name = "2층 청소기 돌리기";
+          routine.step = "2층으로 올라가기";
+        }
+      });
+      const maxId = merged.reduce((highest, routine) => Math.max(highest, Number(routine.id) || 0), 0);
+      let nextId = maxId + 1;
+      defaultState.routines.forEach((routine) => {
+        const exists = merged.some((item) => item.day === routine.day && item.period === routine.period && item.name === routine.name);
+        if (!exists) {
+          merged.push({ ...routine, id: nextId++ });
+        }
+      });
+      return merged;
+    }
+
+    function todayKoreanDay() {
+      const names = ["일", "월", "화", "수", "목", "금", "토"];
+      return names[new Date().getDay()];
+    }
+
+    function koreanDayFor(date) {
+      const names = ["일", "월", "화", "수", "목", "금", "토"];
+      return names[date.getDay()];
+    }
+
+    function dateKey(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function addDays(date, amount) {
+      const next = new Date(date);
+      next.setDate(next.getDate() + amount);
+      return next;
+    }
+
+    function routinesForDate(date) {
+      const day = koreanDayFor(date);
+      return state.routines.filter((routine) => routine.day === day);
+    }
+
+    function isRoutineDone(routine, key = dateKey(new Date())) {
+      return Boolean(state.routineDone?.[key]?.[routine.id]);
+    }
+
+    function setRoutineDone(routine, checked, key = dateKey(new Date())) {
+      state.routineDone = state.routineDone || {};
+      state.routineDone[key] = state.routineDone[key] || {};
+      state.routineDone[key][routine.id] = checked;
+    }
+
+    function isDateAchieved(date) {
+      const routines = routinesForDate(date);
+      if (!routines.length) return false;
+      return routines.every((routine) => isRoutineDone(routine, dateKey(date)));
+    }
+
+    function reviewForToday() {
+      const key = dateKey(new Date());
+      state.dailyReviews = state.dailyReviews || {};
+      state.dailyReviews[key] = state.dailyReviews[key] || { status: "", bedtime: "", screenTime: "" };
+      return state.dailyReviews[key];
+    }
+
+    function hasDailyReview(key) {
+      const review = state.dailyReviews?.[key];
+      return Boolean(review && (review.status || review.bedtime || review.screenTime));
+    }
+
+    function dailySentence() {
+      const sentences = state.sentences || [];
+      if (!sentences.length) return null;
+      const key = dateKey(new Date());
+      const seed = key.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
+      return sentences[seed % sentences.length];
+    }
+
+    function successStreak() {
+      let cursor = new Date();
+      if (!isDateAchieved(cursor)) {
+        cursor = addDays(cursor, -1);
+      }
+
+      let count = 0;
+      while (isDateAchieved(cursor)) {
+        count += 1;
+        cursor = addDays(cursor, -1);
+      }
+      return count;
+    }
+
+    function currentPeriod() {
+      const hour = new Date().getHours();
+      if (hour < 9) return "등교 전";
+      if (hour < 14) return "등교 후";
+      return "하교 후";
+    }
+
+    function currentRoutines() {
+      const day = todayKoreanDay();
+      const period = currentPeriod();
+      return state.routines.filter((routine) => routine.day === day && routine.period === period);
+    }
+
+    function todayRoutines() {
+      const day = todayKoreanDay();
+      return state.routines.filter((routine) => routine.day === day);
+    }
+
+    function renderToday() {
+      const day = todayKoreanDay();
+      const routines = todayRoutines();
+      const todayKey = dateKey(new Date());
+      const next = routines.find((routine) => !isRoutineDone(routine, todayKey)) || routines[0];
+      const doneCount = routines.filter((routine) => isRoutineDone(routine, todayKey)).length;
+      const remainingCount = Math.max(routines.length - doneCount, 0);
+      const now = new Date();
+
+      document.getElementById("todayLabel").textContent = `${new Date().toLocaleDateString("ko-KR")} ${day}요일`;
+      document.getElementById("topDateLabel").textContent = `${now.getMonth() + 1}/${now.getDate()} ${day}`;
+      document.getElementById("streakLabel").textContent = `${successStreak()}일`;
+      document.getElementById("periodPill").textContent = `${routines.length}개`;
+      const sentence = dailySentence();
+      document.getElementById("nextAction").textContent = sentence ? sentence.text : "문장수집함에 문장을 하나 남겨보세요";
+      document.getElementById("focusDone").textContent = `${doneCount}/${routines.length}`;
+      document.getElementById("focusRemaining").textContent = `${remainingCount}개`;
+      document.getElementById("focusPeriod").textContent = next ? next.period : "-";
+      document.getElementById("focusNote").textContent = remainingCount
+        ? `${next.period}의 '${next.name}'부터 다시 잡으면 돼요.`
+        : "오늘 루틴을 모두 체크했어요.";
+
+      const list = document.getElementById("todayRoutines");
+      list.innerHTML = "";
+
+      if (!routines.length) {
+        list.innerHTML = `<div class="empty">오늘 잡힌 루틴이 없어요.</div>`;
+      }
+
+      periods.forEach((period) => {
+        const group = routines.filter((routine) => routine.period === period);
+        if (!group.length) return;
+
+        const block = document.createElement("div");
+        block.className = "time-block";
+        block.innerHTML = `<p class="time-title">${period}</p>`;
+
+        group.forEach((routine) => {
+          const item = document.createElement("label");
+          item.className = "routine";
+          item.innerHTML = `
+            <input type="checkbox" ${isRoutineDone(routine, todayKey) ? "checked" : ""} data-check="${routine.id}">
+            <span class="routine-main">
+              <span class="routine-name">${escapeHtml(routine.name)}</span>
+              <span class="routine-note">${escapeHtml(routine.step)}</span>
+            </span>
+            <span class="level ${routine.level}">${levelLabels[routine.level]}</span>
+          `;
+          block.appendChild(item);
+        });
+
+        list.appendChild(block);
+      });
+
+      const captureList = document.getElementById("captureList");
+      captureList.innerHTML = "";
+      state.captures = normalizeCaptures(state.captures);
+      const openCaptures = state.captures.filter((item) => !item.done);
+      const sortedCaptures = [
+        ...openCaptures,
+        ...state.captures.filter((item) => item.done)
+      ];
+      document.getElementById("captureCount").textContent = `미완료 ${openCaptures.length}개`;
+      sortedCaptures.forEach((capture) => {
+        const item = document.createElement("div");
+        item.className = `routine ${capture.done ? "completed" : ""}`;
+        item.innerHTML = `
+          <input type="checkbox" ${capture.done ? "checked" : ""} data-capture="${capture.id}">
+          <span class="routine-main">
+            <span class="routine-name">${escapeHtml(capture.text)}</span>
+            ${capture.createdAt ? `<span class="routine-note">${escapeHtml(capture.createdAt)}</span>` : ""}
+          </span>
+          <span class="level base">${capture.done ? "완료" : "보관"}</span>
+        `;
+        captureList.appendChild(item);
+      });
+      if (!state.captures.length) {
+        captureList.innerHTML = `<div class="empty">보관된 생각이 없어요.</div>`;
+      }
+    }
+
+    function renderCalendar() {
+      const grid = document.getElementById("calendarGrid");
+      const title = document.getElementById("calendarTitle");
+      const today = new Date();
+      const year = visibleCalendarDate.getFullYear();
+      const month = visibleCalendarDate.getMonth();
+      const first = new Date(year, month, 1);
+      const last = new Date(year, month + 1, 0);
+      const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+
+      title.textContent = `${year}년 ${month + 1}월 성공 기록`;
+      grid.innerHTML = "";
+
+      weekdays.forEach((weekday) => {
+        const cell = document.createElement("div");
+        cell.className = "calendar-weekday";
+        cell.textContent = weekday;
+        grid.appendChild(cell);
+      });
+
+      for (let i = 0; i < first.getDay(); i += 1) {
+        const empty = document.createElement("button");
+        empty.className = "calendar-day empty";
+        empty.type = "button";
+        empty.disabled = true;
+        grid.appendChild(empty);
+      }
+
+      for (let date = 1; date <= last.getDate(); date += 1) {
+        const current = new Date(year, month, date);
+        const key = dateKey(current);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "calendar-day";
+        button.dataset.date = key;
+        button.textContent = date;
+        if (key === dateKey(today)) button.classList.add("today");
+        if (isDateAchieved(current)) button.classList.add("success");
+        if (hasDailyReview(key)) button.classList.add("logged");
+        grid.appendChild(button);
+      }
+    }
+
+    function renderNewsCalendar() {
+      const grid = document.getElementById("newsCalendarGrid");
+      const title = document.getElementById("newsCalendarTitle");
+      const today = new Date();
+      const year = visibleNewsCalendarDate.getFullYear();
+      const month = visibleNewsCalendarDate.getMonth();
+      const first = new Date(year, month, 1);
+      const last = new Date(year, month + 1, 0);
+      const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+      const newsDates = new Set((state.newsEntries || []).map((entry) => entry.dateKey));
+
+      title.textContent = `${year}년 ${month + 1}월 뉴스`;
+      grid.innerHTML = "";
+
+      weekdays.forEach((weekday) => {
+        const cell = document.createElement("div");
+        cell.className = "calendar-weekday";
+        cell.textContent = weekday;
+        grid.appendChild(cell);
+      });
+
+      for (let i = 0; i < first.getDay(); i += 1) {
+        const empty = document.createElement("button");
+        empty.className = "calendar-day empty";
+        empty.type = "button";
+        empty.disabled = true;
+        grid.appendChild(empty);
+      }
+
+      for (let date = 1; date <= last.getDate(); date += 1) {
+        const current = new Date(year, month, date);
+        const key = dateKey(current);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "calendar-day news-calendar-day";
+        button.dataset.newsDate = key;
+        button.textContent = date;
+        if (key === dateKey(today)) button.classList.add("today");
+        if (key === selectedNewsDateKey) button.classList.add("selected");
+        if (newsDates.has(key)) button.classList.add("has-news");
+        grid.appendChild(button);
+      }
+    }
+
+    function renderReview() {
+      const review = reviewForToday();
+      document.getElementById("todayAchieved").textContent = isDateAchieved(new Date()) ? "예" : "아니오";
+      document.getElementById("reviewStreak").textContent = `${successStreak()}일`;
+      document.getElementById("savedThoughts").textContent = state.captures.length;
+      document.getElementById("reviewSaved").textContent = review.status || "미기록";
+      document.getElementById("bedtimeInput").value = review.bedtime || "";
+      document.getElementById("screenTimeInput").value = review.screenTime || "";
+      const backups = getBackups();
+      document.getElementById("backupCount").textContent = `${backups.length}개`;
+      document.getElementById("restoreBackupButton").disabled = backups.length === 0;
+
+      document.querySelectorAll(".status-button").forEach((button) => {
+        button.classList.toggle("selected", button.dataset.status === review.status);
+      });
+    }
+
+    function renderSentences() {
+      const list = document.getElementById("sentenceList");
+      const sentences = state.sentences || [];
+      list.innerHTML = "";
+      document.getElementById("sentenceCount").textContent = `${sentences.length}개`;
+
+      if (!sentences.length) {
+        list.innerHTML = `<div class="empty">아직 수집한 문장이 없어요.</div>`;
+        return;
+      }
+
+      sentences.slice().reverse().forEach((entry) => {
+        const card = document.createElement("article");
+        card.className = "sentence-card";
+        const meta = [entry.date, entry.source].filter(Boolean).join(" · ");
+        card.innerHTML = `
+          <p class="sentence-text">${escapeHtml(entry.text)}</p>
+          ${meta ? `<div class="sentence-meta">${escapeHtml(meta)}</div>` : ""}
+          ${entry.note ? `<div class="sentence-meta">${escapeHtml(entry.note)}</div>` : ""}
+        `;
+        list.appendChild(card);
+      });
+    }
+
+    function renderNews() {
+      const list = document.getElementById("newsList");
+      const entries = normalizeNewsEntries(state.newsEntries);
+      state.newsEntries = entries;
+      const query = newsSearchQuery.trim().toLowerCase();
+      const filtered = entries.filter((entry) => {
+        const haystack = [entry.title, entry.point, entry.thought, entry.action].join(" ").toLowerCase();
+        const matchesSearch = !query || haystack.includes(query);
+        const matchesDate = query || !selectedNewsDateKey || entry.dateKey === selectedNewsDateKey;
+        return matchesSearch && matchesDate;
+      });
+      list.innerHTML = "";
+      document.getElementById("newsCount").textContent = `${filtered.length}개`;
+      document.getElementById("newsListTitle").textContent = query
+        ? "검색 결과"
+        : `${selectedNewsDateKey} 뉴스`;
+
+      if (!filtered.length) {
+        list.innerHTML = `<div class="empty">해당되는 뉴스가 없어요.</div>`;
+        return;
+      }
+
+      filtered.slice().reverse().forEach((entry) => {
+        const card = document.createElement("article");
+        card.className = "news-card";
+        card.innerHTML = `
+          <p class="news-title">${escapeHtml(entry.title)}</p>
+          ${entry.point ? `<div class="news-meta">핵심: ${escapeHtml(entry.point)}</div>` : ""}
+          ${entry.thought ? `<div class="news-meta">생각: ${escapeHtml(entry.thought)}</div>` : ""}
+          ${entry.action ? `<div class="news-meta">다음: ${escapeHtml(entry.action)}</div>` : ""}
+          <div class="news-meta">${escapeHtml(entry.date)}</div>
+        `;
+        list.appendChild(card);
+      });
+    }
+
+    function renderAll() {
+      renderToday();
+      renderCalendar();
+      renderNewsCalendar();
+      renderReview();
+      renderSentences();
+      renderNews();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((button) => button.classList.remove("active"));
+        document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById(tab.dataset.view).classList.add("active");
+      });
+    });
+
+    document.getElementById("todayRoutines").addEventListener("change", (event) => {
+      const id = Number(event.target.dataset.check);
+      const routine = state.routines.find((item) => item.id === id);
+      if (!routine) return;
+      setRoutineDone(routine, event.target.checked);
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("captureButton").addEventListener("click", () => {
+      const input = document.getElementById("captureInput");
+      const text = input.value.trim();
+      if (!text) return;
+      state.captures = normalizeCaptures(state.captures);
+      state.captures.push({
+        id: Date.now(),
+        text,
+        done: false,
+        createdAt: new Date().toLocaleDateString("ko-KR")
+      });
+      input.value = "";
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("captureList").addEventListener("change", (event) => {
+      const id = Number(event.target.dataset.capture);
+      if (!id) return;
+      state.captures = normalizeCaptures(state.captures);
+      const capture = state.captures.find((item) => Number(item.id) === id);
+      if (!capture) return;
+      capture.done = event.target.checked;
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("statusOptions").addEventListener("click", (event) => {
+      if (!event.target.dataset.status) return;
+      reviewForToday().status = event.target.dataset.status;
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("bedtimeInput").addEventListener("change", (event) => {
+      reviewForToday().bedtime = event.target.value;
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("screenTimeInput").addEventListener("input", (event) => {
+      reviewForToday().screenTime = event.target.value.trim();
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("prevMonthButton").addEventListener("click", () => {
+      visibleCalendarDate = new Date(visibleCalendarDate.getFullYear(), visibleCalendarDate.getMonth() - 1, 1);
+      renderCalendar();
+    });
+
+    document.getElementById("nextMonthButton").addEventListener("click", () => {
+      visibleCalendarDate = new Date(visibleCalendarDate.getFullYear(), visibleCalendarDate.getMonth() + 1, 1);
+      renderCalendar();
+    });
+
+    document.getElementById("todayMonthButton").addEventListener("click", () => {
+      visibleCalendarDate = new Date();
+      renderCalendar();
+    });
+
+    document.getElementById("prevNewsMonthButton").addEventListener("click", () => {
+      visibleNewsCalendarDate = new Date(visibleNewsCalendarDate.getFullYear(), visibleNewsCalendarDate.getMonth() - 1, 1);
+      renderNewsCalendar();
+    });
+
+    document.getElementById("nextNewsMonthButton").addEventListener("click", () => {
+      visibleNewsCalendarDate = new Date(visibleNewsCalendarDate.getFullYear(), visibleNewsCalendarDate.getMonth() + 1, 1);
+      renderNewsCalendar();
+    });
+
+    document.getElementById("todayNewsMonthButton").addEventListener("click", () => {
+      visibleNewsCalendarDate = new Date();
+      selectedNewsDateKey = dateKey(new Date());
+      newsSearchQuery = "";
+      document.getElementById("newsSearchInput").value = "";
+      renderNewsCalendar();
+      renderNews();
+    });
+
+    document.getElementById("newsCalendarGrid").addEventListener("click", (event) => {
+      const key = event.target.dataset.newsDate;
+      if (!key) return;
+      selectedNewsDateKey = key;
+      newsSearchQuery = "";
+      document.getElementById("newsSearchInput").value = "";
+      renderNewsCalendar();
+      renderNews();
+    });
+
+    document.getElementById("newsSearchInput").addEventListener("input", (event) => {
+      newsSearchQuery = event.target.value;
+      renderNews();
+    });
+
+    document.getElementById("sentenceForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = document.getElementById("sentenceText").value.trim();
+      if (!text) return;
+      state.sentences = state.sentences || [];
+      state.sentences.push({
+        id: Date.now(),
+        date: new Date().toLocaleDateString("ko-KR"),
+        text,
+        source: document.getElementById("sentenceSource").value.trim(),
+        note: document.getElementById("sentenceNote").value.trim()
+      });
+      event.target.reset();
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("newsForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const title = document.getElementById("newsTitle").value.trim();
+      if (!title) return;
+      state.newsEntries = state.newsEntries || [];
+      state.newsEntries.push({
+        id: Date.now(),
+        date: new Date().toLocaleDateString("ko-KR"),
+        dateKey: dateKey(new Date()),
+        title,
+        point: document.getElementById("newsPoint").value.trim(),
+        thought: document.getElementById("newsThought").value.trim(),
+        action: document.getElementById("newsAction").value.trim()
+      });
+      event.target.reset();
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("restoreBackupButton").addEventListener("click", () => {
+      const backup = getBackups()[0];
+      if (!backup) return;
+      const ok = window.confirm(`${backup.createdAt} 백업을 복구할까요? 현재 기록은 다시 백업해둘게요.`);
+      if (!ok) return;
+      createBackup("복구 전", state);
+      state = mergeStates(state, backup.state);
+      saveState();
+      renderAll();
+    });
+
+    document.getElementById("resetButton").addEventListener("click", () => {
+      createBackup("초기화 전", state);
+      localStorage.removeItem(storageKey);
+      state = structuredClone(defaultState);
+      renderAll();
+    });
+
+    renderAll();
+    initFirebaseSync();
+  </script>
+</body>
+</html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>루틴 복귀 페이지</title>
+  <style>
+    :root {
+      --bg: #f6f5f1;
+      --ink: #222426;
+      --muted: #6a6f73;
+      --line: #dedbd2;
+      --panel: #ffffff;
+      --green: #2f7d5f;
+      --green-soft: #e7f2ed;
+      --blue: #3f6f9f;
+      --blue-soft: #e9f0f7;
+      --yellow: #a26f18;
+      --yellow-soft: #fff2d7;
+      --red: #b6534a;
+      --red-soft: #f8e8e5;
+      --shadow: 0 14px 36px rgba(39, 36, 28, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input, select, textarea {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    .app {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      padding: 22px 18px 34px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 25px;
+      line-height: 1.2;
+      font-weight: 800;
+    }
+
+    .date {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .top-stats {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .top-stat {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 12px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 20px rgba(39, 36, 28, 0.05);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .top-stat strong {
+      color: var(--ink);
+      font-size: 16px;
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.68);
+    }
+
+    .tab {
+      min-height: 38px;
+      padding: 0 13px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .tab.active {
+      background: var(--ink);
+      color: #fff;
+    }
+
+    .view {
+      display: none;
+    }
+
+    .view.active {
+      display: block;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 18px;
+      align-items: start;
+      margin-bottom: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .focus {
+      min-height: 500px;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 28px;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .flow-title {
+      margin: 0;
+      font-size: 38px;
+      line-height: 1.16;
+      letter-spacing: 0;
+    }
+
+    .next-action {
+      margin-top: 22px;
+      padding: 18px;
+      border-radius: 8px;
+      background: var(--green-soft);
+      border: 1px solid #c8e4d7;
+    }
+
+    .next-action strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--green);
+      font-size: 14px;
+    }
+
+    .next-action p {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+    }
+
+    .focus-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+      margin-top: 14px;
+    }
+
+    .focus-stat {
+      min-height: 70px;
+      display: grid;
+      align-content: center;
+      gap: 4px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #faf9f6;
+      border: 1px solid #ebe8df;
+    }
+
+    .focus-stat span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .focus-stat strong {
+      color: var(--ink);
+      font-size: 18px;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+
+    .focus-note {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .big-button {
+      min-height: 58px;
+      border-radius: 8px;
+      padding: 0 16px;
+      font-weight: 800;
+      color: #fff;
+      background: var(--green);
+    }
+
+    .soft-button {
+      min-height: 58px;
+      border-radius: 8px;
+      padding: 0 14px;
+      color: var(--ink);
+      background: #efeee8;
+      border: 1px solid var(--line);
+      font-weight: 750;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .section {
+      padding: 18px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .pill {
+      min-height: 30px;
+      padding: 0 10px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .routine-list {
+      display: grid;
+      gap: 9px;
+    }
+
+    .routine {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 46px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: #faf9f6;
+      border: 1px solid #ebe8df;
+    }
+
+    .routine.completed {
+      opacity: 0.62;
+    }
+
+    .routine.completed .routine-name {
+      text-decoration: line-through;
+    }
+
+    .routine input {
+      width: 20px;
+      height: 20px;
+      accent-color: var(--green);
+    }
+
+    .routine-main {
+      min-width: 0;
+    }
+
+    .routine-name {
+      display: block;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .routine-note {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .level {
+      border-radius: 999px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .level.must {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .level.base {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .level.extra {
+      background: var(--yellow-soft);
+      color: var(--yellow);
+    }
+
+    .capture {
+      display: grid;
+      gap: 10px;
+    }
+
+    textarea, input[type="text"], select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 12px;
+      outline: 0;
+    }
+
+    textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+
+    .mini-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      min-height: 38px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: #f1f0eb;
+      border: 1px solid var(--line);
+      color: var(--ink);
+      font-weight: 750;
+    }
+
+    .chip.selected {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    .manager {
+      display: grid;
+      grid-template-columns: 310px 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .form {
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .week-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .day-column {
+      min-height: 340px;
+      padding: 12px;
+      border-left: 1px solid var(--line);
+    }
+
+    .day-column:first-child {
+      border-left: 0;
+    }
+
+    .day-title {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .time-block {
+      margin-bottom: 14px;
+    }
+
+    .time-title {
+      margin: 0 0 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .tiny-item {
+      display: block;
+      margin-bottom: 6px;
+      padding: 8px;
+      border-radius: 7px;
+      background: #faf9f6;
+      border: 1px solid #ebe8df;
+      font-size: 13px;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .review-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .status-options {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .status-button {
+      min-height: 84px;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #faf9f6;
+      font-weight: 850;
+      color: var(--ink);
+    }
+
+    .status-button.selected {
+      color: #fff;
+      background: var(--ink);
+      border-color: var(--ink);
+    }
+
+    .summary-box {
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .calendar {
+      padding: 18px;
+    }
+
+    .calendar-nav {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .icon-button {
+      width: 34px;
+      min-width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #f1f0eb;
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .calendar-weekday {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      text-align: center;
+      padding: 6px 0;
+    }
+
+    .calendar-day {
+      position: relative;
+      min-height: 64px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #faf9f6;
+      color: var(--ink);
+      font-weight: 850;
+      text-align: left;
+      padding: 9px;
+    }
+
+    .calendar-day.empty {
+      border-style: dashed;
+      background: transparent;
+      cursor: default;
+    }
+
+    .calendar-day.today {
+      border-color: var(--blue);
+      box-shadow: inset 0 0 0 1px var(--blue);
+    }
+
+    .calendar-day.success {
+      background: var(--green-soft);
+      border-color: #b8dccb;
+      color: var(--green);
+    }
+
+    .calendar-day.success::after {
+      content: "달성";
+      position: absolute;
+      right: 8px;
+      bottom: 7px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .calendar-day.logged::before {
+      content: "기록";
+      position: absolute;
+      left: 8px;
+      bottom: 7px;
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .review-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .sentence-page {
+      display: grid;
+      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .news-page {
+      display: grid;
+      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .news-tools {
+      display: grid;
+      gap: 18px;
+    }
+
+    .news-calendar-day.has-news {
+      border-color: #c8d8ee;
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .news-calendar-day.selected {
+      border-color: var(--ink);
+      box-shadow: inset 0 0 0 1px var(--ink);
+    }
+
+    .search-row {
+      display: grid;
+      gap: 10px;
+    }
+
+    .sentence-form, .news-form {
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .sentence-list, .news-list {
+      padding: 18px;
+    }
+
+    .sentence-card, .news-card {
+      display: grid;
+      gap: 7px;
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid #ebe8df;
+      background: #faf9f6;
+    }
+
+    .sentence-text, .news-title {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.45;
+      font-weight: 850;
+      overflow-wrap: anywhere;
+    }
+
+    .sentence-meta, .news-meta {
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 46px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .stat strong {
+      color: var(--ink);
+      font-size: 18px;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-size: 14px;
+      padding: 12px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #fbfaf7;
+    }
+
+    @media (max-width: 860px) {
+      .topbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .top-stats {
+        justify-content: stretch;
+      }
+
+      .top-stat {
+        flex: 1;
+        justify-content: center;
+      }
+
+      .dashboard, .manager, .review-grid, .sentence-page, .news-page {
+        grid-template-columns: 1fr;
+      }
+
+      .focus {
+        min-height: 420px;
+        padding: 22px;
+      }
+
+      .flow-title {
+        font-size: 31px;
+      }
+
+      .week-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .day-column {
+        min-height: 0;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+
+      .day-column:first-child {
+        border-top: 0;
+      }
+    }
+
+    @media (max-width: 540px) {
+      .app {
+        padding: 16px 12px 26px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      .tab {
+        padding: 0 8px;
+        font-size: 14px;
+      }
+
+      .calendar-grid {
+        gap: 5px;
+      }
+
+      .calendar-day {
+        min-height: 50px;
+        padding: 7px;
+      }
+
+      .focus-stats {
+        grid-template-columns: 1fr;
+      }
+
+      .form-grid, .status-options, .review-fields {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="brand">
+        <h1>Memento mori</h1>
+        <div class="date" id="todayLabel">오늘</div>
+      </div>
+      <div class="top-stats">
+        <div class="top-stat">오늘 <strong id="topDateLabel">-</strong></div>
+        <div class="top-stat">연속 성공 <strong id="streakLabel">0일</strong></div>
+        <div class="top-stat">저장 <strong id="syncStatus">로컬</strong></div>
+      </div>
+      <nav class="tabs" aria-label="페이지">
+        <button class="tab active" data-view="today">오늘</button>
+        <button class="tab" data-view="news">뉴스정리</button>
+        <button class="tab" data-view="sentences">문장수집함</button>
+        <button class="tab" data-view="review">하루 마무리</button>
+      </nav>
+    </header>
+
+    <section class="view active" id="today">
+      <div class="dashboard">
+        <article class="panel focus">
+          <div>
+            <p class="eyebrow">오늘을 다시 붙잡는 곳</p>
+            <div class="next-action">
+              <strong>오늘의 문장</strong>
+              <p id="nextAction">문장수집함에 문장을 하나 남겨보세요</p>
+            </div>
+            <div class="focus-stats">
+              <div class="focus-stat">
+                <span>완료</span>
+                <strong id="focusDone">0/0</strong>
+              </div>
+              <div class="focus-stat">
+                <span>남은 루틴</span>
+                <strong id="focusRemaining">0개</strong>
+              </div>
+              <div class="focus-stat">
+                <span>현재 구간</span>
+                <strong id="focusPeriod">-</strong>
+              </div>
+            </div>
+            <p class="focus-note" id="focusNote">체크를 많이 하는 곳이 아니라, 다시 시작할 지점을 찾는 곳.</p>
+          </div>
+        </article>
+
+        <div class="stack">
+          <article class="panel section">
+            <div class="section-head">
+              <h2>오늘의 루틴</h2>
+              <span class="pill" id="periodPill">전체</span>
+            </div>
+            <div class="routine-list" id="todayRoutines"></div>
+          </article>
+
+          <article class="panel section">
+            <div class="section-head">
+              <h2>나중에 볼 생각</h2>
+              <span class="pill" id="captureCount">0개</span>
+            </div>
+            <div class="capture">
+              <textarea id="captureInput" placeholder="지금 하지 않아도 되는 생각을 잠깐 내려놓기"></textarea>
+              <button class="soft-button" id="captureButton">보관</button>
+              <div class="routine-list" id="captureList"></div>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <article class="panel calendar">
+        <div class="section-head">
+          <h2 id="calendarTitle">이번 달 성공 기록</h2>
+          <div class="calendar-nav">
+            <button class="icon-button" id="prevMonthButton" type="button" aria-label="이전 달">‹</button>
+            <button class="icon-button" id="todayMonthButton" type="button" aria-label="이번 달">•</button>
+            <button class="icon-button" id="nextMonthButton" type="button" aria-label="다음 달">›</button>
+            <span class="pill">루틴 완료와 하루 기록 반영</span>
+          </div>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </article>
+    </section>
+
+    <section class="view" id="review">
+      <div class="review-grid">
+        <article class="panel section">
+          <div class="section-head">
+            <h2>오늘 상태</h2>
+            <span class="pill" id="reviewSaved">미기록</span>
+          </div>
+          <div class="status-options" id="statusOptions">
+            <button class="status-button" data-status="좋음">좋음</button>
+            <button class="status-button" data-status="흔들림">흔들림</button>
+            <button class="status-button" data-status="리셋 필요">리셋 필요</button>
+          </div>
+          <div class="review-fields">
+            <label>
+              취침한 시간
+              <input type="time" id="bedtimeInput">
+            </label>
+            <label>
+              스크린타임
+              <input type="text" id="screenTimeInput" placeholder="예: 2시간 30분">
+            </label>
+          </div>
+        </article>
+
+        <article class="panel summary-box">
+          <h2>이번 주 감각</h2>
+          <div class="stat"><span>오늘 루틴 달성</span><strong id="todayAchieved">아니오</strong></div>
+          <div class="stat"><span>연속 성공</span><strong id="reviewStreak">0일</strong></div>
+          <div class="stat"><span>보관한 생각</span><strong id="savedThoughts">0</strong></div>
           <button class="soft-button" id="resetButton">샘플 기록 초기화</button>
         </article>
       </div>
