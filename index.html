@@ -340,6 +340,18 @@
       text-decoration: line-through;
     }
 
+    .capture-item {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    .capture-item .item-actions {
+      margin-top: 0;
+    }
+
+    .capture-item.editing {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
     .routine input {
       width: 20px;
       height: 20px;
@@ -1123,6 +1135,8 @@
       routineSchemaVersion: 2,
       historicalAchievedDates: [],
       captures: [],
+      captureResetVersion: 1,
+      deletedCaptureIds: [],
       returns: 0,
       completedFlows: 0,
       review: { status: "", reason: "" },
@@ -1141,6 +1155,7 @@
     let newsSearchQuery = "";
     let editingSentenceId = null;
     let editingNewsId = null;
+    let editingCaptureId = null;
 
     function loadState() {
       const saved = localStorage.getItem(storageKey);
@@ -1179,6 +1194,7 @@
         + (source.deletedRoutineKeys || []).length;
       return doneCount
         + (source.captures || []).length
+        + (source.deletedCaptureIds || []).length
         + (source.sentences || []).length
         + (source.newsEntries || []).length
         + reviewCount
@@ -1199,6 +1215,8 @@
         routineDone: value.routineDone || {},
         historicalAchievedDates: value.historicalAchievedDates || [],
         captures: value.captures || [],
+        captureResetVersion: value.captureResetVersion || 0,
+        deletedCaptureIds: value.deletedCaptureIds || [],
         sentences: value.sentences || [],
         newsEntries: value.newsEntries || [],
         dailyReviews: value.dailyReviews || {},
@@ -1232,6 +1250,20 @@
       return Array.from(map.values());
     }
 
+    function mergeCaptures(localList, remoteList, deletedIds) {
+      const deleted = new Set(deletedIds);
+      const merged = new Map();
+      [...localList, ...remoteList].forEach((item) => {
+        const key = String(item.id);
+        if (deleted.has(key)) return;
+        const previous = merged.get(key);
+        if (!previous || (item.updatedAt || 0) > (previous.updatedAt || 0)) {
+          merged.set(key, item);
+        }
+      });
+      return Array.from(merged.values());
+    }
+
     function mergeStates(localState, remoteState) {
       const local = normalizeState(localState);
       const remote = normalizeState(remoteState);
@@ -1252,7 +1284,8 @@
           screenTime: value?.screenTime || current.screenTime || ""
         };
       });
-      merged.captures = mergeListByKey(local.captures, remote.captures, (item) => item.id || item.text);
+      merged.deletedCaptureIds = Array.from(new Set([...(local.deletedCaptureIds || []), ...(remote.deletedCaptureIds || [])]));
+      merged.captures = mergeCaptures(local.captures, remote.captures, merged.deletedCaptureIds);
       merged.sentences = mergeListByKey(local.sentences, remote.sentences, (item) => item.id || `${item.date}-${item.text}`);
       merged.newsEntries = mergeListByKey(local.newsEntries, remote.newsEntries, (item) => item.id || `${item.dateKey}-${item.title}`);
       merged.deletedRoutineKeys = Array.from(new Set([...(local.deletedRoutineKeys || []), ...(remote.deletedRoutineKeys || [])]));
@@ -1263,6 +1296,16 @@
     function normalizeState(value) {
       const parsed = { ...structuredClone(defaultState), ...(value || {}) };
       parsed.captures = normalizeCaptures(parsed.captures);
+      parsed.deletedCaptureIds = (parsed.deletedCaptureIds || []).map(String);
+      if (value?.captureResetVersion !== 1) {
+        parsed.deletedCaptureIds = Array.from(new Set([
+          ...parsed.deletedCaptureIds,
+          ...parsed.captures.map((item) => String(item.id))
+        ]));
+        parsed.captures = [];
+      }
+      parsed.captureResetVersion = 1;
+      parsed.captures = parsed.captures.filter((item) => !parsed.deletedCaptureIds.includes(String(item.id)));
       parsed.deletedRoutineKeys = parsed.deletedRoutineKeys || [];
       parsed.historicalAchievedDates = parsed.historicalAchievedDates || [];
       if (value?.routineSchemaVersion !== 2) {
@@ -1344,7 +1387,7 @@
         cloudDb = db;
         if (snap.exists) {
           const remote = snap.data()?.state || {};
-          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2) {
+          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2 || remote.captureResetVersion !== 1) {
             scheduleCloudSave();
           }
         }
@@ -1365,7 +1408,7 @@
           } finally {
             applyingCloudState = false;
           }
-          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2) {
+          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2 || remote.captureResetVersion !== 1) {
             scheduleCloudSave();
           }
           setSyncStatus("Firebase");
@@ -1416,7 +1459,8 @@
           id: item.id || Date.now() + Math.random(),
           text: item.text || "",
           done: Boolean(item.done),
-          createdAt: item.createdAt || ""
+          createdAt: item.createdAt || "",
+          updatedAt: Number(item.updatedAt) || 0
         };
       }).filter((item) => item.text);
     }
@@ -1617,15 +1661,32 @@
       document.getElementById("captureCount").textContent = `미완료 ${openCaptures.length}개`;
       sortedCaptures.forEach((capture) => {
         const item = document.createElement("div");
-        item.className = `routine ${capture.done ? "completed" : ""}`;
-        item.innerHTML = `
-          <input type="checkbox" ${capture.done ? "checked" : ""} data-capture="${capture.id}">
-          <span class="routine-main">
-            <span class="routine-name">${escapeHtml(capture.text)}</span>
-            ${capture.createdAt ? `<span class="routine-note">${escapeHtml(capture.createdAt)}</span>` : ""}
-          </span>
-          <span class="level base">${capture.done ? "완료" : "보관"}</span>
-        `;
+        const id = escapeHtml(capture.id);
+        if (String(editingCaptureId) === String(capture.id)) {
+          item.className = "routine capture-item editing";
+          item.innerHTML = `
+            <div class="inline-edit-form">
+              <label>생각<textarea data-capture-text="${id}">${escapeHtml(capture.text)}</textarea></label>
+              <div class="item-actions">
+                <button class="small-button" type="button" data-save-capture="${id}">저장</button>
+                <button class="small-button" type="button" data-cancel-capture="${id}">취소</button>
+              </div>
+            </div>
+          `;
+        } else {
+          item.className = `routine capture-item ${capture.done ? "completed" : ""}`;
+          item.innerHTML = `
+            <input type="checkbox" aria-label="${escapeHtml(capture.text)} 완료" ${capture.done ? "checked" : ""} data-capture="${id}">
+            <span class="routine-main">
+              <span class="routine-name">${escapeHtml(capture.text)}</span>
+              ${capture.createdAt ? `<span class="routine-note">${escapeHtml(capture.createdAt)}</span>` : ""}
+            </span>
+            <span class="item-actions">
+              <button class="small-button" type="button" data-edit-capture="${id}">수정</button>
+              <button class="small-button danger" type="button" data-delete-capture="${id}">삭제</button>
+            </span>
+          `;
+        }
         captureList.appendChild(item);
       });
       if (!state.captures.length) {
@@ -1926,8 +1987,8 @@
     });
 
     document.getElementById("todayRoutines").addEventListener("change", (event) => {
-      const id = Number(event.target.dataset.check);
-      const routine = state.routines.find((item) => item.id === id);
+      const id = event.target.dataset.check;
+      const routine = state.routines.find((item) => String(item.id) === id);
       if (!routine) return;
       setRoutineDone(routine, event.target.checked);
       saveState();
@@ -1943,7 +2004,8 @@
         id: Date.now(),
         text,
         done: false,
-        createdAt: new Date().toLocaleDateString("ko-KR")
+        createdAt: new Date().toLocaleDateString("ko-KR"),
+        updatedAt: Date.now()
       });
       input.value = "";
       saveState();
@@ -1951,13 +2013,45 @@
     });
 
     document.getElementById("captureList").addEventListener("change", (event) => {
-      const id = Number(event.target.dataset.capture);
+      const id = event.target.dataset.capture;
       if (!id) return;
       state.captures = normalizeCaptures(state.captures);
-      const capture = state.captures.find((item) => Number(item.id) === id);
+      const capture = state.captures.find((item) => String(item.id) === id);
       if (!capture) return;
       capture.done = event.target.checked;
+      capture.updatedAt = Date.now();
       saveState();
+      renderAll();
+    });
+
+    document.getElementById("captureList").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      const id = button.dataset.editCapture || button.dataset.deleteCapture
+        || button.dataset.saveCapture || button.dataset.cancelCapture;
+      if (!id) return;
+      const index = state.captures.findIndex((item) => String(item.id) === id);
+      if (index < 0) return;
+
+      if (button.dataset.deleteCapture) {
+        if (!window.confirm("이 생각을 삭제할까요?")) return;
+        createBackup("생각 삭제 전", state);
+        state.deletedCaptureIds = Array.from(new Set([...(state.deletedCaptureIds || []), id]));
+        state.captures.splice(index, 1);
+        editingCaptureId = null;
+        saveState();
+      } else if (button.dataset.editCapture) {
+        editingCaptureId = id;
+      } else if (button.dataset.cancelCapture) {
+        editingCaptureId = null;
+      } else {
+        const text = button.closest(".capture-item").querySelector("textarea").value.trim();
+        if (!text) return;
+        createBackup("생각 수정 전", state);
+        state.captures[index] = { ...state.captures[index], text, updatedAt: Date.now() };
+        editingCaptureId = null;
+        saveState();
+      }
       renderAll();
     });
 
