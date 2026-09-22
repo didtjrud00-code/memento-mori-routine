@@ -114,6 +114,23 @@
       font-size: 16px;
     }
 
+    .auth-button {
+      min-height: 38px;
+      padding: 0 12px;
+      border: 1px solid var(--green);
+      border-radius: 8px;
+      background: var(--green-soft);
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .auth-button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
     .tabs {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -877,6 +894,7 @@
         <div class="top-stat">오늘 <strong id="topDateLabel">-</strong></div>
         <div class="top-stat">연속 성공 <strong id="streakLabel">0일</strong></div>
         <div class="top-stat">저장 <strong id="syncStatus">로컬</strong></div>
+        <button class="auth-button" id="authButton" type="button" disabled>Google 로그인</button>
       </div>
       <nav class="tabs" aria-label="페이지">
         <button class="tab active" data-view="today">오늘</button>
@@ -1066,6 +1084,7 @@
   </main>
 
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script>
     const days = ["월", "화", "수", "목", "금", "토", "일"];
@@ -1080,8 +1099,11 @@
       appId: "1:931496968100:web:4a4d21be367b2050d48b31"
     };
     const firebaseDocumentPath = "memento/default";
+    let firebaseAuth = null;
     let cloudDb = null;
     let cloudSaveTimer = null;
+    let cloudUnsubscribe = null;
+    let authGeneration = 0;
     let applyingCloudState = false;
 
     function makeWeekdayRoutines() {
@@ -1289,53 +1311,99 @@
       }, 450);
     }
 
-    async function initFirebaseSync() {
-      if (!hasFirebaseConfig() || !window.firebase?.firestore) {
-        setSyncStatus("로컬");
-        return;
-      }
+    function disconnectCloud() {
+      authGeneration += 1;
+      clearTimeout(cloudSaveTimer);
+      if (cloudUnsubscribe) cloudUnsubscribe();
+      cloudUnsubscribe = null;
+      cloudDb = null;
+    }
 
+    async function connectCloud() {
+      disconnectCloud();
+      const generation = authGeneration;
+      const db = firebase.firestore();
+      const ref = db.doc(firebaseDocumentPath);
+      setSyncStatus("연결중");
       try {
-        firebase.initializeApp(firebaseConfig);
-        cloudDb = firebase.firestore();
-        setSyncStatus("연결중");
-
-        const ref = cloudDb.doc(firebaseDocumentPath);
         const snap = await ref.get();
+        if (generation !== authGeneration) return;
         if (snap.exists) {
           const remote = snap.data()?.state || {};
           createBackup("Firebase 동기화 전", state);
           state = mergeStates(state, remote);
           writeLocalState(state);
-          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2) {
-            scheduleCloudSave();
-          }
         } else {
           await ref.set({
             state,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
+          if (generation !== authGeneration) return;
         }
 
-        ref.onSnapshot((snapshot) => {
+        cloudDb = db;
+        if (snap.exists) {
+          const remote = snap.data()?.state || {};
+          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2) {
+            scheduleCloudSave();
+          }
+        }
+        cloudUnsubscribe = ref.onSnapshot((snapshot) => {
+          if (generation !== authGeneration) return;
           if (!snapshot.exists) return;
           applyingCloudState = true;
-          const remote = snapshot.data()?.state || {};
-          createBackup("Firebase 업데이트 전", state);
-          state = mergeStates(state, remote);
-          writeLocalState(state);
-          renderAll();
-          applyingCloudState = false;
+          let remote;
+          try {
+            remote = snapshot.data()?.state || {};
+            createBackup("Firebase 업데이트 전", state);
+            state = mergeStates(state, remote);
+            writeLocalState(state);
+            renderAll();
+          } catch {
+            setSyncStatus("동기화 오류");
+            return;
+          } finally {
+            applyingCloudState = false;
+          }
           if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2) {
             scheduleCloudSave();
           }
           setSyncStatus("Firebase");
+        }, () => {
+          if (generation !== authGeneration) return;
+          disconnectCloud();
+          setSyncStatus("접근 오류");
         });
 
         renderAll();
         setSyncStatus("Firebase");
       } catch {
-        setSyncStatus("로컬");
+        if (generation === authGeneration) setSyncStatus("접근 오류");
+      }
+    }
+
+    function initFirebaseSync() {
+      if (!hasFirebaseConfig() || !window.firebase?.firestore || !window.firebase?.auth) {
+        setSyncStatus("연결 불가");
+        return;
+      }
+
+      try {
+        firebase.initializeApp(firebaseConfig);
+        firebaseAuth = firebase.auth();
+        firebaseAuth.onAuthStateChanged((user) => {
+          const button = document.getElementById("authButton");
+          button.disabled = false;
+          button.textContent = user ? "로그아웃" : "Google 로그인";
+          if (user) {
+            connectCloud();
+          } else {
+            disconnectCloud();
+            setSyncStatus("로그인 필요");
+          }
+        }, () => setSyncStatus("인증 오류"));
+      } catch {
+        setSyncStatus("연결 불가");
       }
     }
 
@@ -1830,6 +1898,23 @@
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
     }
+
+    document.getElementById("authButton").addEventListener("click", async () => {
+      if (!firebaseAuth) return;
+      const button = document.getElementById("authButton");
+      button.disabled = true;
+      try {
+        if (firebaseAuth.currentUser) {
+          await firebaseAuth.signOut();
+        } else {
+          await firebaseAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
+        }
+      } catch (error) {
+        setSyncStatus(error.code === "auth/popup-closed-by-user" ? "로그인 필요" : "로그인 오류");
+      } finally {
+        button.disabled = false;
+      }
+    });
 
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => {

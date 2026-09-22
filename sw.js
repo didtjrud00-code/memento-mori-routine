@@ -1,4 +1,4 @@
-const CACHE_NAME = "memento-mori-pwa-v5";
+const CACHE_NAME = "memento-mori-pwa-v6";
 const APP_SHELL = [
   "./",
   "./index.html",
