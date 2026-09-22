@@ -905,7 +905,7 @@
                 <strong id="focusRemaining">0개</strong>
               </div>
               <div class="focus-stat">
-                <span>현재 구간</span>
+                <span>다음 루틴</span>
                 <strong id="focusPeriod">-</strong>
               </div>
             </div>
@@ -1069,8 +1069,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script>
     const days = ["월", "화", "수", "목", "금", "토", "일"];
-    const periods = ["등교 전", "등교 후", "하교 후"];
-    const levelLabels = { must: "필수", base: "기본", extra: "여유" };
     const storageKey = "routine-return-sample-v10";
     const backupKey = `${storageKey}-backups`;
     const firebaseConfig = {
@@ -1087,40 +1085,21 @@
     let applyingCloudState = false;
 
     function makeWeekdayRoutines() {
-      const weekdayDays = ["월", "화", "수", "목", "금"];
-      const morning = [
-        ["세수 양치", "세면대 앞에 서기", "must"],
-        ["음악틀기", "음악 앱 열기", "base"],
-        ["줄넘기 3분 2사이클", "줄넘기 꺼내기", "base"],
-        ["식물 물주고 잡초 뽑기", "화분 앞에 서기", "base"],
-        ["아침 만들기", "부엌 불 켜기", "must"],
-        ["식세기돌리기", "식세기 문 열기", "base"],
-        ["1층 청소기 돌리기", "청소기 꺼내기", "base"]
+      const daily = [
+        ["jump", "줄넘기 1000개"],
+        ["read", "독서"],
+        ["piano", "피아노"],
+        ["diary", "일기쓰기"]
       ];
-      const schoolTime = [
-        ["세탁기 돌리기", "세탁물 넣기", "must"],
-        ["2층 청소기 돌리기", "2층으로 올라가기", "base"],
-        ["신문읽고 헤드라인, 생각정리", "신문 펼치기", "base"],
-        ["전화영어", "전화영어 준비 화면 열기", "must"],
-        ["문장수집", "수집 노트 열기", "base"],
-        ["피아노연습", "피아노 앞에 앉기", "base"]
-      ];
-      const afterSchool = [
-        ["데런 추세추종 정리", "차트와 기록장 열기", "base"],
-        ["일기쓰기", "일기장 열기", "must"],
-        ["세수 양치", "세면대 앞에 서기", "must"]
-      ];
-      let id = 1;
-      return weekdayDays.flatMap((day) => [
-        ...morning.map(([name, step, level]) => ({ id: id++, day, period: "등교 전", level, name, step, done: false })),
-        ...schoolTime.map(([name, step, level]) => ({ id: id++, day, period: "등교 후", level, name, step, done: false })),
-        ...(day === "수" || day === "금" ? [{ id: id++, day, period: "하교 후", level: "base", name: "도서관가기", step: "도서관 가방 챙기기", done: false }] : []),
-        ...afterSchool.map(([name, step, level]) => ({ id: id++, day, period: "하교 후", level, name, step, done: false }))
-      ]);
+      return days.flatMap((day) => daily.map(([id, name]) => ({
+        id: `daily-${day}-${id}`, day, name
+      })));
     }
 
     const defaultState = {
       routines: makeWeekdayRoutines(),
+      routineSchemaVersion: 2,
+      historicalAchievedDates: [],
       captures: [],
       returns: 0,
       completedFlows: 0,
@@ -1181,7 +1160,8 @@
         + (source.sentences || []).length
         + (source.newsEntries || []).length
         + reviewCount
-        + routineEditCount;
+        + routineEditCount
+        + (source.historicalAchievedDates || []).length;
     }
 
     function getBackups() {
@@ -1195,6 +1175,7 @@
     function backupFingerprint(value) {
       return JSON.stringify({
         routineDone: value.routineDone || {},
+        historicalAchievedDates: value.historicalAchievedDates || [],
         captures: value.captures || [],
         sentences: value.sentences || [],
         newsEntries: value.newsEntries || [],
@@ -1253,6 +1234,7 @@
       merged.sentences = mergeListByKey(local.sentences, remote.sentences, (item) => item.id || `${item.date}-${item.text}`);
       merged.newsEntries = mergeListByKey(local.newsEntries, remote.newsEntries, (item) => item.id || `${item.dateKey}-${item.title}`);
       merged.deletedRoutineKeys = Array.from(new Set([...(local.deletedRoutineKeys || []), ...(remote.deletedRoutineKeys || [])]));
+      merged.historicalAchievedDates = Array.from(new Set([...(local.historicalAchievedDates || []), ...(remote.historicalAchievedDates || [])]));
       return normalizeState(merged);
     }
 
@@ -1260,7 +1242,20 @@
       const parsed = { ...structuredClone(defaultState), ...(value || {}) };
       parsed.captures = normalizeCaptures(parsed.captures);
       parsed.deletedRoutineKeys = parsed.deletedRoutineKeys || [];
-      parsed.routines = mergeDefaultRoutines(parsed.routines, parsed.deletedRoutineKeys);
+      parsed.historicalAchievedDates = parsed.historicalAchievedDates || [];
+      if (value?.routineSchemaVersion !== 2) {
+        const legacyRoutines = parsed.routines || [];
+        const today = dateKey(new Date());
+        const completedDates = Object.entries(parsed.routineDone || {}).filter(([key, checks]) => {
+          if (key >= today) return false;
+          const day = koreanDayFor(dateFromKey(key));
+          const scheduled = legacyRoutines.filter((routine) => routine.day === day);
+          return scheduled.length && scheduled.every((routine) => checks?.[routine.id]);
+        }).map(([key]) => key);
+        parsed.historicalAchievedDates = Array.from(new Set([...parsed.historicalAchievedDates, ...completedDates]));
+      }
+      parsed.routineSchemaVersion = 2;
+      parsed.routines = structuredClone(defaultState.routines);
       parsed.dailyReviews = parsed.dailyReviews || {};
       parsed.routineDone = parsed.routineDone || {};
       parsed.sentences = normalizeSentences(parsed.sentences);
@@ -1312,7 +1307,7 @@
           createBackup("Firebase 동기화 전", state);
           state = mergeStates(state, remote);
           writeLocalState(state);
-          if (stateScore(state) > stateScore(remote)) {
+          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2) {
             scheduleCloudSave();
           }
         } else {
@@ -1331,7 +1326,7 @@
           writeLocalState(state);
           renderAll();
           applyingCloudState = false;
-          if (stateScore(state) > stateScore(remote)) {
+          if (stateScore(state) > stateScore(remote) || remote.routineSchemaVersion !== 2) {
             scheduleCloudSave();
           }
           setSyncStatus("Firebase");
@@ -1385,41 +1380,6 @@
       const match = String(value).match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})/);
       if (!match) return "";
       return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
-    }
-
-    function mergeDefaultRoutines(routines, deletedRoutineKeys = []) {
-      const deletedKeys = new Set(deletedRoutineKeys);
-      const merged = (routines || []).filter((routine) => !deletedKeys.has(routineKey(routine)));
-      merged.forEach((routine) => {
-        if (routine.period === "등교 후" && routine.name === "1,2층 청소기 돌리기") {
-          routine.name = "2층 청소기 돌리기";
-          routine.step = "2층으로 올라가기";
-        }
-      });
-      const maxId = merged.reduce((highest, routine) => Math.max(highest, Number(routine.id) || 0), 0);
-      let nextId = maxId + 1;
-      defaultState.routines.forEach((routine) => {
-        if (deletedKeys.has(routineKey(routine))) return;
-        const exists = merged.some((item) => item.day === routine.day && item.period === routine.period && item.name === routine.name);
-        if (!exists) {
-          merged.push({ ...routine, id: nextId++ });
-        }
-      });
-      return merged;
-    }
-
-    function routineKey(routine) {
-      return `${routine.day}|${routine.period}|${routine.name}`;
-    }
-
-    function isDefaultRoutine(routine) {
-      return defaultState.routines.some((item) => routineKey(item) === routineKey(routine));
-    }
-
-    function cleanupRoutineDone(routineId) {
-      Object.values(state.routineDone || {}).forEach((day) => {
-        if (day) delete day[routineId];
-      });
     }
 
     function todayKoreanDay() {
@@ -1479,6 +1439,7 @@
     }
 
     function isDateAchieved(date) {
+      if (state.historicalAchievedDates?.includes(dateKey(date))) return true;
       const routines = routinesForDate(date);
       if (!routines.length) return false;
       return routines.every((routine) => isRoutineDone(routine, dateKey(date)));
@@ -1525,19 +1486,6 @@
       return count;
     }
 
-    function currentPeriod() {
-      const hour = new Date().getHours();
-      if (hour < 9) return "등교 전";
-      if (hour < 14) return "등교 후";
-      return "하교 후";
-    }
-
-    function currentRoutines() {
-      const day = todayKoreanDay();
-      const period = currentPeriod();
-      return state.routines.filter((routine) => routine.day === day && routine.period === period);
-    }
-
     function todayRoutines() {
       const day = todayKoreanDay();
       return state.routines.filter((routine) => routine.day === day);
@@ -1560,9 +1508,9 @@
       document.getElementById("nextAction").textContent = sentence ? sentence.text : "문장수집함에 문장을 하나 남겨보세요";
       document.getElementById("focusDone").textContent = `${doneCount}/${routines.length}`;
       document.getElementById("focusRemaining").textContent = `${remainingCount}개`;
-      document.getElementById("focusPeriod").textContent = next ? next.period : "-";
+      document.getElementById("focusPeriod").textContent = next && remainingCount ? next.name : "완료";
       document.getElementById("focusNote").textContent = remainingCount
-        ? `${next.period}의 '${next.name}'부터 다시 잡으면 돼요.`
+        ? `'${next.name}'부터 다시 잡으면 돼요.`
         : "오늘 루틴을 모두 체크했어요.";
 
       const list = document.getElementById("todayRoutines");
@@ -1572,30 +1520,23 @@
         list.innerHTML = `<div class="empty">오늘 잡힌 루틴이 없어요.</div>`;
       }
 
-      periods.forEach((period) => {
-        const group = routines.filter((routine) => routine.period === period);
-        if (!group.length) return;
-
+      if (routines.length) {
         const block = document.createElement("div");
         block.className = "time-block";
-        block.innerHTML = `<p class="time-title">${period}</p>`;
-
-        group.forEach((routine) => {
+        routines.forEach((routine) => {
           const item = document.createElement("div");
           item.className = "routine";
           item.innerHTML = `
             <input type="checkbox" ${isRoutineDone(routine, todayKey) ? "checked" : ""} data-check="${routine.id}">
             <span class="routine-main">
               <span class="routine-name">${escapeHtml(routine.name)}</span>
-              <span class="routine-note">${escapeHtml(routine.step)}</span>
             </span>
-            <span class="level ${routine.level}">${levelLabels[routine.level]}</span>
           `;
           block.appendChild(item);
         });
 
         list.appendChild(block);
-      });
+      }
 
       const captureList = document.getElementById("captureList");
       captureList.innerHTML = "";
